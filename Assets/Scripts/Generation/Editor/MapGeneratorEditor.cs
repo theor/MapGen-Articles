@@ -2,7 +2,7 @@ using UnityEditor;
 using UnityEditor.Graphs;
 using UnityEngine;
 
-namespace Editor
+namespace Generation.Editor
 {
     [CustomEditor(typeof(MapGenerator))]
     public class MapGeneratorEditor : UnityEditor.Editor
