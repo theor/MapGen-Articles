@@ -54,6 +54,16 @@ public class MapGenerator : MonoBehaviour
     {
         Dispose();
         using var points = Generation.GenerateRandomPoints(Count, Size, Seed, Allocator.TempJob);
+        // Storage = new TriangleStorage(6, Allocator.Persistent);
+        // for (int i = 0; i < 6; i++)
+        // {
+        //     Storage.AddVertex(i, points[i]);
+        // }
+        //
+        // Storage.AddTriangle(0, 1, 2);
+        // Storage.AddTriangle(0, 2, 1);
+        // Storage.AddTriangle(3,4,5);
+        // Storage.AddTriangle(3,5,4);
         Storage = Generation.DelaunayTriangulation(points, Size);
 
         GenerateMeshFromStorage();

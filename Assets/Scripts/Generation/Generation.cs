@@ -83,7 +83,7 @@ namespace Generation
 
         public static TriangleStorage DelaunayTriangulation(NativeArray<float2> points, float size)
         {
-            var storage = new TriangleStorage(points.Length + 3);
+            var storage = new TriangleStorage(points.Length + 3, Allocator.Persistent);
             var sw = Stopwatch.StartNew();
             var job = new BowyerWatsonJob()
             {

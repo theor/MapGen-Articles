@@ -44,6 +44,8 @@ namespace Generation
             public Edge Edge2 => new Edge(V2, V3);
             public Edge Edge3 => new Edge(V3, V1);
 
+            public bool ContainsVertex(int v) => V1 == v || V2 == v || V3 == v;
+            
             // public bool Contains(int v1, int v2, int v3)
             // {
             //     if (V1 == v1 && V2 == v2 && V3 == v3)
@@ -55,7 +57,6 @@ namespace Generation
             //     return false;
             // }
 
-            public bool ContainsVertex(int v) => V1 == v || V2 == v || V3 == v;
 
             // public static bool GetReversedEdgeIndex(Triangle triangle, Edge neighourTriangleEdge, out int index)
             // {
@@ -115,14 +116,17 @@ namespace Generation
         public NativeList<Triangle> Triangles;
         public NativeQueue<int> DeletedTriangles1;
         public NativeQueue<int> DeletedTriangles2;
+        
+        private bool _firstPool;
+        public void SwapPool() => _firstPool = !_firstPool;
 
-        public TriangleStorage(int pointsLength)
+        public TriangleStorage(int pointsLength, Allocator allocator)
         {
-            Points = new NativeArray<Vertex>(pointsLength, Allocator.Persistent);
-            Triangles = new NativeList<Triangle>(Allocator.Persistent);
+            Points = new NativeArray<Vertex>(pointsLength, allocator);
+            Triangles = new NativeList<Triangle>(allocator);
             DeletedTriangles1 = new NativeQueue<int>(Allocator.Persistent);
             DeletedTriangles2 = new NativeQueue<int>(Allocator.Persistent);
-            pool1 = true;
+            _firstPool = true;
         }
 
         public bool IsCreated => Points.IsCreated;
@@ -140,115 +144,78 @@ namespace Generation
                 DeletedTriangles2.Dispose();
         }
 
+        public void AddVertex(int i, float2 position) => Points[i] = new Vertex {Position = position, TriangleIndex = -1};
 
-        public void AddVertices(NativeArray<float2> float2s)
+        public unsafe int AddTriangle(ushort v1, ushort v2, ushort v3)
         {
-            for (int i = 0; i < float2s.Length; i++)
+            int idx;
+            if ((_firstPool ? DeletedTriangles1 : DeletedTriangles2).TryDequeue(out idx))
             {
-                Points[i] = new Vertex {Position = float2s[i], TriangleIndex = -1};
+                Triangle* triPtr = (Triangle*) Triangles.GetUnsafePtr();
+                Triangle* triangle = triPtr + idx;
+                var t = new Triangle(this, v1, v2, v3);
+                UnsafeUtility.CopyStructureToPtr(ref t, triangle);
             }
-        }
-
-        public void AddVertex(int i, float2 position)
-        {
-            Points[i] = new Vertex {Position = position, TriangleIndex = -1};
-        }
-
-        public int AddTriangle(ushort v1, ushort v2, ushort v3)
-        {
-            unsafe
+            else
             {
-                int idx;
-                if ((pool1 ? DeletedTriangles1 : DeletedTriangles2).TryDequeue(out idx))
-                {
-                    Triangle* triPtr = (Triangle*) Triangles.GetUnsafePtr();
-                    Triangle* triangle = triPtr + idx;
-                    var t = new Triangle(this, v1, v2, v3);
-                    UnsafeUtility.CopyStructureToPtr(ref t, triangle);
-                }
-                else
-                {
-                    var t = new Triangle(this, v1, v2, v3);
-                    Triangles.Add(t);
-                    idx = Triangles.Length - 1;
-                }
-
-                var unsafePtr = (Vertex*) Points.GetUnsafePtr();
-                (unsafePtr + v1)->TriangleIndex = idx;
-                (unsafePtr + v2)->TriangleIndex = idx;
-                (unsafePtr + v3)->TriangleIndex = idx;
-                return idx;
+                var t = new Triangle(this, v1, v2, v3);
+                Triangles.Add(t);
+                idx = Triangles.Length - 1;
             }
+
+            var unsafePtr = (Vertex*) Points.GetUnsafePtr();
+            (unsafePtr + v1)->TriangleIndex = idx;
+            (unsafePtr + v2)->TriangleIndex = idx;
+            (unsafePtr + v3)->TriangleIndex = idx;
+            return idx;
         }
 
-        public int AddTriangle(EdgeRef neighborEdge, ushort ip)
+        public int AddTriangle(EdgeRef neighborEdge, ushort vertexIndex)
         {
             var deletedTriangle = Triangles[neighborEdge.TriangleIndex];
-            Edge e;
-            int i;
-            Triangle newTriangle;
+            Assert.IsTrue(neighborEdge.EdgeIndex < 3);
+            
+            Edge e = default;
             switch (neighborEdge.EdgeIndex)
             {
-                case 0:
-                    e = deletedTriangle.Edge1;
-                    i = AddTriangle(e.A, e.B, ip);
-                    newTriangle = Triangles[i];
-                    newTriangle.T1 = deletedTriangle.T1;
-                    Triangles[i] = newTriangle;
-                    SetNeighbour(newTriangle.T1, e.A, e.B, i); // !
-                    break;
-                case 1:
-                    e = deletedTriangle.Edge2;
-                    i = AddTriangle(e.A, e.B, ip);
-                    newTriangle = Triangles[i];
-                    newTriangle.T1 = deletedTriangle.T2;
-                    Triangles[i] = newTriangle;
-                    SetNeighbour(newTriangle.T1, e.A, e.B, i); // !
-                    break;
-                case 2:
-                    e = deletedTriangle.Edge3;
-                    i = AddTriangle(e.A, e.B, ip);
-                    newTriangle = Triangles[i];
-                    newTriangle.T1 = deletedTriangle.T3;
-                    Triangles[i] = newTriangle;
-                    SetNeighbour(newTriangle.T1, e.A, e.B, i); // !
-                    break;
-                default: throw new InvalidDataException();
+                case 0: e = deletedTriangle.Edge1; break;
+                case 1: e = deletedTriangle.Edge2; break;
+                case 2: e = deletedTriangle.Edge3; break;
             }
+            
+            var i = AddTriangle(e.A, e.B, vertexIndex);
+            ref Triangle newTriangle = ref Triangles.ElementAt(i);
+
+            switch (neighborEdge.EdgeIndex)
+            {
+                case 0: newTriangle.T1 = deletedTriangle.T1; break;
+                case 1: newTriangle.T1 = deletedTriangle.T2; break;
+                case 2: newTriangle.T1 = deletedTriangle.T3; break;
+            }
+            if(newTriangle.T1 != -1)
+                SetNeighbour(ref Triangles.ElementAt(newTriangle.T1), e.A, e.B, i); // !
 
             return i;
         }
 
-        public void RemoveTriangle(int i)
+        public ref Triangle RemoveTriangle(int triIndex)
         {
-            var triangle = Triangles[i];
+            ref var triangle = ref Triangles.ElementAt(triIndex);
             triangle.IsDeleted = true;
-            Triangles[i] = triangle;
-            if (pool1)
-                DeletedTriangles1.Enqueue(i);
+            Triangles[triIndex] = triangle;
+            if (_firstPool)
+                DeletedTriangles1.Enqueue(triIndex);
             else
-                DeletedTriangles2.Enqueue(i);
-        }
-
-        public void RemoveTrianglePatchNeighbours(int index)
-        {
-            var t = Triangles[index];
-            t.IsDeleted = true;
-            SetNeighbour(t.T1, t.Edge1.A, t.Edge1.B, -1);
-            SetNeighbour(t.T2, t.Edge2.A, t.Edge2.B, -1);
-            SetNeighbour(t.T3, t.Edge3.A, t.Edge3.B, -1);
-            Triangles[index] = t;
+                DeletedTriangles2.Enqueue(triIndex);
+            return ref triangle;
         }
 
         public float3 F3(int i, float y = 0) => Geometry.V3(Points[i].Position, y);
 
         public float2 F2(ushort pi1) => Points[pi1].Position;
 
-        private void SetNeighbour(int triangleIndex, ushort vertexA, ushort vertexB, int newNeighbourIndex)
+        public void SetNeighbour(ref Triangle t, ushort vertexA, ushort vertexB, int newNeighbourIndex)
         {
-            if (triangleIndex == -1)
-                return;
-            var t = Triangles[triangleIndex];
             if (t.Edge1.A == vertexB && t.Edge1.B == vertexA)
                 t.T1 = newNeighbourIndex;
             else if (t.Edge2.A == vertexB && t.Edge2.B == vertexA)
@@ -257,7 +224,6 @@ namespace Generation
                 t.T3 = newNeighbourIndex;
             else
                 Assert.IsTrue(false);
-            Triangles[triangleIndex] = t;
         }
 
         // public bool GetNextTriangleAround(int vertex, ref int cur, ref int prev)
@@ -283,13 +249,7 @@ namespace Generation
         //
         //     return false;
         // }
-
-        private bool pool1;
-
-        public void SwapPool()
-        {
-            pool1 = !pool1;
-        }
+        //
 
         // public int FindTriangle(QuadTree quadTree, float2 pos, float quadTreeQueryRadius)
         // {

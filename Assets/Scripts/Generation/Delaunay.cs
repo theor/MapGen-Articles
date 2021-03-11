@@ -11,6 +11,7 @@ namespace Generation
     [BurstCompile]
     struct BowyerWatsonJob : IJob
     {
+        [ReadOnly]
         public NativeArray<float2> Points;
         public float Size;
         public TriangleStorage Storage;
@@ -24,17 +25,19 @@ namespace Generation
             AddToBadTrianglesListMarker,
             M8;
 
-        public void Execute()
-        {
-            BowyerWatson(Size, Points);
-        }
+        public void Execute() => BowyerWatson(Size, Points);
 
         private void BowyerWatson(float size, NativeArray<float2> points)
         {
             BowyerWatsonMarker.Begin();
 
-            Assert.IsFalse(Storage.Points.Length > UInt16.MaxValue - 3, "Last 3 Ids reserved for the super triangle");
-            Storage.AddVertices(points);
+            Assert.IsFalse(Storage.Points.Length > UInt16.MaxValue - 3, "We need 3 extra indices for the super triangle");
+
+            // Add all points to triangulate
+            for (int i = 0; i < points.Length; i++)
+                Storage.AddVertex(i, points[i]);
+
+            // Compute the super triangle vertices and add them at the end
             var superTriangleA = new float2(0.5f * size, -2.5f * size);
             Storage.AddVertex(points.Length, superTriangleA);
             var superTriangleB = new float2(-1.5f * size, 2.5f * size);
@@ -42,11 +45,16 @@ namespace Generation
             var superTriangleC = new float2(2.5f * size, 2.5f * size);
             Storage.AddVertex(points.Length + 2, superTriangleC);
 
+            // Add the triangle itself
             Storage.AddTriangle((ushort) points.Length, (ushort) (points.Length + 1), (ushort) (points.Length + 2));
 
-            // maps a Vertex Index to a vertex (including the special cases of the super triangle)
+            // List of triangle indices that intersect with the newly added point.
             var badTriangles = new NativeList<int>(100, Allocator.Temp);
+            // The list of edges forming the contour around the hole created when we delete the bad triangles
+            // We'll recreate a new valid triangle with the point being added and each edge 
             var polygon = new NativeList<TriangleStorage.EdgeRef>(10, Allocator.Temp);
+            
+            // a list for newly created triangles. we'll patch each new triangle's neighbors 
             NativeList<int> newTriangles = new NativeList<int>(polygon.Length, Allocator.Temp);
 
             for (int ip = 0; ip < Storage.Points.Length - 3; ip++)
@@ -61,9 +69,10 @@ namespace Generation
                 // first find all the triangles that are no longer valid due to the insertion
                 // slowest part (~93% of the time is spent here)
                 var trianglesLength = Storage.Triangles.Length;
-                for (int index = 0; index < trianglesLength; index++)
+                // flood fill
+                for (int triangleIndex = 0; triangleIndex < trianglesLength; triangleIndex++)
                 {
-                    var triangle = Storage.Triangles[index];
+                    var triangle = Storage.Triangles[triangleIndex];
                     if (triangle.IsDeleted)
                         continue;
                     // if point is inside circumcircle of triangle (cached in the triangle)
@@ -72,24 +81,20 @@ namespace Generation
                     {
                         // found first bad triangle
                         // recurse to find other bad triangles which will all be connected to this one
-                        badTriangles.Add(index);
-                        Rec(in point, index, ref badTriangles);
+                        badTriangles.Add(triangleIndex);
+                        FloodFillBadTriangles(in point, triangleIndex, ref badTriangles);
                         break;
                     }
                 }
-
-                // for (int index = 0; index < trianglesLength; index++)
+                // naive approach
+                // for (int triangleIndex = 0; triangleIndex < trianglesLength; triangleIndex++)
                 // {
-                //     var triangle = Storage.Triangles[index];
+                //     var triangle = Storage.Triangles[triangleIndex];
                 //     if (triangle.IsDeleted)
                 //         continue;
                 //     // if point is inside circumcircle of triangle (cached in the triangle)
                 //     if (math.distancesq(point.Position, triangle.CircumCircleCenter.xz) < triangle.CircumCircleRadiusSquared)
-                //     {
-                //         AddToBadTrianglesListMarker.Begin();
-                //         badTriangles.Add(index);
-                //         AddToBadTrianglesListMarker.End();
-                //     }
+                //         badTriangles.Add(triangleIndex);
                 // }
 
                 InvalidTrianglesMarker.End();
@@ -113,7 +118,6 @@ namespace Generation
                 {
                     int i = badTriangles[index];
                     Storage.RemoveTriangle(i);
-                    // triangulation.RemoveAtSwapBack(i);
                 }
 
                 Storage.SwapPool();
@@ -126,9 +130,7 @@ namespace Generation
                     // potential optim: use deleted triangles as some kind of quadtree (tritree ?)
                     // index tris by their circumcenter
                     // that sets t1. t2,t3 set below
-                    var newTriangleIndex =
-                        Storage.AddTriangle(edge,
-                            (ushort) ip); // TODO !!! need to delay triangle pooling as AddTriangle uses the previous one
+                    var newTriangleIndex = Storage.AddTriangle(edge, (ushort) ip);
                     newTriangles.Add(newTriangleIndex);
                 }
 
@@ -169,37 +171,19 @@ namespace Generation
                 if (!triangle.IsDeleted && (triangle.ContainsVertex(points.Length) ||
                                             triangle.ContainsVertex(points.Length + 1) ||
                                             triangle.ContainsVertex(points.Length + 2)))
-                    Storage.RemoveTrianglePatchNeighbours(index);
+                {
+                    ref var t = ref Storage.RemoveTriangle(index);
+                    if(t.T1 != -1)
+                        Storage.SetNeighbour(ref Storage.Triangles.ElementAt(t.T1), t.Edge1.A, t.Edge1.B, -1);
+                    if(t.T2 != -1)
+                        Storage.SetNeighbour(ref Storage.Triangles.ElementAt(t.T2), t.Edge2.A, t.Edge2.B, -1);
+                    if(t.T3 != -1)
+                        Storage.SetNeighbour(ref Storage.Triangles.ElementAt(t.T3), t.Edge3.A, t.Edge3.B, -1);
+                    Storage.Triangles[index] = t;
+                }
             }
 
             BowyerWatsonMarker.End();
-        }
-
-        private void Rec(in TriangleStorage.Vertex v, int triangleIndex, ref NativeList<int> badTriangles)
-        {
-            var triangle = Storage.Triangles[triangleIndex];
-            CheckNeighbour(in v, triangle.T1, ref badTriangles);
-            CheckNeighbour(in v, triangle.T2, ref badTriangles);
-            CheckNeighbour(in v, triangle.T3, ref badTriangles);
-        }
-
-        private void CheckNeighbour(in TriangleStorage.Vertex v, int triangleIndex, ref NativeList<int> badTriangles)
-        {
-            if (triangleIndex == -1)
-                return;
-            var n1 = Storage.Triangles[triangleIndex];
-            var badTrianglesLength = badTriangles.Length;
-            for (int i = 0; i < badTrianglesLength; i++)
-            {
-                if (badTriangles[i] == triangleIndex) // already added
-                    return;
-            }
-
-            if (math.distancesq(v.Position, n1.CircumCircleCenter.xz) < n1.CircumCircleRadiusSquared)
-            {
-                badTriangles.Add(triangleIndex);
-                Rec(v, triangleIndex, ref badTriangles);
-            }
         }
 
         private static void AddNonSharedEdgeToPolygon(TriangleStorage storage, NativeList<int> badTriangleIndices,
@@ -227,6 +211,33 @@ namespace Generation
 
             if (!any)
                 polygon.Add(new TriangleStorage.EdgeRef(badTriangleIndex, edgeIndex));
+        }
+
+        private void FloodFillBadTriangles(in TriangleStorage.Vertex v, int triangleIndex, ref NativeList<int> badTriangles)
+        {
+            var triangle = Storage.Triangles[triangleIndex];
+            CheckNeighbour(in v, triangle.T1, ref badTriangles);
+            CheckNeighbour(in v, triangle.T2, ref badTriangles);
+            CheckNeighbour(in v, triangle.T3, ref badTriangles);
+        }
+
+        private void CheckNeighbour(in TriangleStorage.Vertex v, int triangleIndex, ref NativeList<int> badTriangles)
+        {
+            if (triangleIndex == -1)
+                return;
+            var n1 = Storage.Triangles[triangleIndex];
+            var badTrianglesLength = badTriangles.Length;
+            for (int i = 0; i < badTrianglesLength; i++)
+            {
+                if (badTriangles[i] == triangleIndex) // already added
+                    return;
+            }
+
+            if (math.distancesq(v.Position, n1.CircumCircleCenter.xz) < n1.CircumCircleRadiusSquared)
+            {
+                badTriangles.Add(triangleIndex);
+                FloodFillBadTriangles(v, triangleIndex, ref badTriangles);
+            }
         }
     }
 }
