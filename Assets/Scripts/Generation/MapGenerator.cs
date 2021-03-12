@@ -38,11 +38,24 @@ public class MapGenerator : MonoBehaviour
     // Size of the square generated mesh in world space
     public int Size = 100;
     // Random seed
-    public int Seed;
+    public Params GenerationParams  = new Params
+    {
+        lacunarity = 2,
+        persistence = .5f,
+        octaves = 4,
+        noiseScale = 40,
+
+        HeightFactor = 1,
+    };
+
+    public int SmoothPasses;
+
     
     [Header("Data")]
     // Generated points
     public TriangleStorage Storage;
+    public NativeArray<TriangleData> Tridata;
+    public float MinHeight, MaxHeight;
     
     [Header("Debug")]
     
@@ -54,18 +67,14 @@ public class MapGenerator : MonoBehaviour
     public void Generate()
     {
         Dispose();
-        using var points = Generation.GenerateRandomPoints(Count, Size, Seed, Allocator.TempJob);
-        // Storage = new TriangleStorage(6, Allocator.Persistent);
-        // for (int i = 0; i < 6; i++)
-        // {
-        //     Storage.AddVertex(i, points[i]);
-        // }
-        //
-        // Storage.AddTriangle(0, 1, 2);
-        // Storage.AddTriangle(0, 2, 1);
-        // Storage.AddTriangle(3,4,5);
-        // Storage.AddTriangle(3,5,4);
+        
+        using var points = Generation.GenerateRandomPoints(Count, Size, GenerationParams.Seed, Allocator.TempJob);
+        
         Storage = Generation.DelaunayTriangulation(points, Size);
+        Tridata = Generation.GenerateHeightMap(Storage, GenerationParams);
+        for (int i = 0; i < SmoothPasses; i++)
+            Generation.SmoothHeights(ref Tridata, Storage);
+        Generation.NormalizeHeights(in Tridata, out MinHeight, out MaxHeight);
 
         GenerateMeshFromStorage();
     }
@@ -84,9 +93,9 @@ public class MapGenerator : MonoBehaviour
                 Color c1, c2, c3;
                 switch (ColorMode)
                 {
-                    // case ColorModes.HeightVisualization: // when UseTriangleHeight:
-                    //     c1 = c2 = c3 = h(Tridata[index]);
-                    //     break;
+                    case ColorModes.HeightVisualization: // when UseTriangleHeight:
+                        c1 = c2 = c3 = h(Tridata[index]);
+                        break;
                     case ColorModes.None:
                         c1 = c2 = c3 = Color.white;
                         break;
@@ -103,7 +112,7 @@ public class MapGenerator : MonoBehaviour
                     default: throw new InvalidDataException(ColorMode.ToString());
                 }
                 
-                b.AddTriangle(sFace, Storage, index / (float)Storage.Triangles.Length, c1, c2, c3);
+                b.AddTriangle(sFace, Storage, Tridata[index].Height * GenerationParams.HeightFactor, c1, c2, c3);
 
                 // b.AddTriangle(sFace, Storage,
                 //     _params.HeightFactor *
@@ -117,6 +126,44 @@ public class MapGenerator : MonoBehaviour
                 //     c3);
             }
         });
+        
+        Color h(TriangleData tridata)
+        {
+            var f = math.clamp(math.remap(-1f, 1f, 0f, 1f, tridata.Height), 0f, 1f);
+
+            Color Hex(string s)
+            {
+                ColorUtility.TryParseHtmlString(s, out var c);
+                return c;
+            }
+
+            var x = math.remap(0f, 1f, 0.8f, 1f, (float)HaltonSequence.Halton((int) (tridata.Centroid.x*13 + tridata.Centroid.y*23), 7));
+
+            // var colors = new Color[] {Hex("#ce6a6b"), Hex("#ebaca2"), Hex("#bed3c3"), Hex("#4a919e"), Hex("#212e53")};
+            var colors = new Color[] {Hex("#090446"), Hex("#786F52"), Hex("#FEB95F"), Hex("#F71735"), Hex("#C2095A")};
+            if (f < 0.2f)
+                return colors[0] * x;
+            if (f < 0.4f)
+                return colors[1] * x;
+            if (f < 0.6f)
+                return colors[2] * x;
+            if (f < 0.8f)
+                return colors[3] * x;
+            return colors[4] * x;
+            // if (tridata.Height < GenerationParams.SeaLevel)
+            // {
+            //     var waterF = math.clamp(math.remap(Min, GenerationParams.SeaLevel, 0, 1, tridata.Height), 0, 1);
+            //     waterF = math.pow(waterF, 3);
+            //
+            //     return new Color(waterF * 0.29f, waterF * 0.61f, waterF * 1f);
+            // }
+            //
+            // if (tridata.WaterFlow >= WaterParams.RiverMinWaterFlow)
+            //     return Color.cyan;
+            //
+            // var height2 = math.clamp(math.remap(GenerationParams.SeaLevel, Max, 0, 1, tridata.Height), 0.2f, 1);
+            // return new Color(height2, height2, height2);
+        }
     }
 
     private void OnDrawGizmosSelected()
@@ -149,7 +196,7 @@ public class MapGenerator : MonoBehaviour
                     Gizmos.color = HaltonSequence.ColorFromIndex(index, v:1);
                     Gizmos.DrawLine(v1, v2);
                     Gizmos.DrawLine(v2, v3);
-                    Gizmos.DrawLine(v3, v1);
+                    Gizmos.DrawLine(v3, v1); 
                 }
 
                 break;
@@ -158,9 +205,25 @@ public class MapGenerator : MonoBehaviour
         }
     }
 
+    private void Update()
+    {
+        if(EditorApplication.isCompiling)
+            Dispose(); 
+    }
+
     private void Dispose()
     {
-        if(Storage.IsCreated) Storage.Dispose();
+        if(Storage.IsCreated)
+            Storage.Dispose();
+        try
+        {
+            if(Tridata.IsCreated)
+                Tridata.Dispose();
+        }
+        catch (Exception e)
+        {
+            Debug.LogException(e);
+        }
     }
 
     private void OnDisable() => Dispose();

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using Generation.Jobs;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -12,7 +13,7 @@ using Random = Unity.Mathematics.Random;
 
 namespace Generation
 {
-    public class Generation
+    public static class Generation
     {
         public static NativeArray<float2> GenerateRandomPoints(int count, int size, int seed, Allocator allocator)
         {
@@ -105,5 +106,94 @@ namespace Generation
             Generation.LogSw(sw, "Triangulation");
             return storage;
         }
+
+        public static NativeArray<TriangleData> GenerateHeightMap(in TriangleStorage storage, Params generationParams)
+        {
+            // DisposeIfCreated(_data);
+            var sw = Stopwatch.StartNew();
+            // _data = new NativeArray<VertexData>(_s.Points.Length, Allocator.Persistent,NativeArrayOptions.UninitializedMemory);
+            var tridata = new NativeArray<TriangleData>(storage.Triangles.Length, Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            var mapJob = new HeightmapJob()
+            {
+                // _data = _data,
+                Tridata = tridata,
+                S = storage,
+                Params = generationParams,
+            };
+            mapJob.Run();
+            // _data = mapJob._data;
+            tridata = mapJob.Tridata;
+            LogSw(sw, "HeightMap");
+            return tridata;
+        }
+        
+        public static void SmoothHeights(ref NativeArray<TriangleData> tridata, TriangleStorage storage)
+        {
+            var output = new NativeArray<TriangleData>(tridata, Allocator.Persistent);
+            var smoothJob = new SmoothJob
+            {
+                Input = tridata,
+                Output = output,
+                Storage = storage,
+            };
+            var smoothJobHandle = smoothJob.Schedule(tridata.Length, 64);
+
+            tridata.Dispose(smoothJobHandle).Complete();
+            tridata = output;
+        }
+
+        public static void NormalizeHeights(in NativeArray<TriangleData> tridata, out float minHeight, out float maxHeight)
+        {
+            var sw = Stopwatch.StartNew();
+            var minMaxJob = new MinMaxJob
+            {
+                Input = tridata,
+                Min = new NativeArray<float>(new[] {float.MaxValue}, Allocator.TempJob),
+                Max = new NativeArray<float>(new[] {float.MinValue}, Allocator.TempJob),
+            };
+            minMaxJob.Run(tridata.Length);
+            minHeight = minMaxJob.Min[0];
+            maxHeight = minMaxJob.Max[0];
+            minMaxJob.Min.Dispose();
+            minMaxJob.Max.Dispose();
+            LogSw(sw, "Find Min/Max Heights");
+            sw.Restart();
+            var normalizeHeightJob = new NormalizeHeightJob
+            {
+                Min = minHeight,
+                Max = maxHeight,
+                Input = tridata,
+            };
+            normalizeHeightJob.Schedule(tridata.Length, 64).Complete();
+            LogSw(sw, "Normalize Heights");
+        }
+    }
+
+    [Serializable]
+    public struct Params
+    {
+        public float noiseScale;
+        public float lacunarity;
+        public int octaves;
+        public float persistence;
+
+        public float HeightFactor;
+        // [Range(-1, 1)] public float SeaLevel;
+        //
+        // [Range(0, 10)] public float SlopeXOverYFactor;
+        //
+        // public float SlopeAngleFactor;
+        // public float SlopeMinX;
+        public int Seed;
+    }
+    
+    public struct TriangleData
+    {
+        public float Height;
+        public float2 Centroid;
+        // public float2 TriSlope;
+        // public int LowestNeighbour;
+        // public int WaterFlow;
     }
 }
