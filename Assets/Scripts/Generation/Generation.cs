@@ -173,10 +173,12 @@ namespace Generation
     [Serializable]
     public struct Params
     {
-        public float noiseScale;
-        public float lacunarity;
-        public int octaves;
-        public float persistence;
+        public int Seed;
+        // noise params
+        public float NoiseScale;
+        public float Lacunarity;
+        public int Octaves;
+        public float Persistence;
 
         public float HeightFactor;
         // [Range(-1, 1)] public float SeaLevel;
@@ -185,7 +187,6 @@ namespace Generation
         //
         // public float SlopeAngleFactor;
         // public float SlopeMinX;
-        public int Seed;
     }
     
     public struct TriangleData

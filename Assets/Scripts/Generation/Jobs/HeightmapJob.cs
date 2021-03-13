@@ -16,8 +16,13 @@ namespace Generation.Jobs
         public unsafe void Execute()
         {
             var triData = ((TriangleData*) Tridata.GetUnsafePtr());
-            var seedOffset = new float2((float) HaltonSequence.Halton(Params.Seed, 7),
-                (float) HaltonSequence.Halton(Params.Seed, 11));
+            float2 seedOffset;
+            unchecked
+            {
+                seedOffset = new float2(
+                    (float)(HaltonSequence.Halton(Params.Seed << 7, 7)),
+                    (float)(HaltonSequence.Halton(Params.Seed << 11, 11)));
+            }
             for (var index = 0; index < S.Triangles.Length; index++)
             {
                 var t = S.Triangles[index];
@@ -28,7 +33,7 @@ namespace Generation.Jobs
                 var c = S.F2(t.V3);
                 var p = (a + b + c) / 3.0f;
                 (triData + index)->Centroid = p;
-                p = (p + seedOffset) / Params.noiseScale;
+                p = (p + seedOffset) / Params.NoiseScale;
 
                 var height =
                         fbm(p + fbm(p))
@@ -40,14 +45,14 @@ namespace Generation.Jobs
 
         private float fbm(float2 pos)
         {
-            float g = math.exp2(-Params.persistence);
+            float g = math.exp2(-Params.Persistence);
             float f = 1.0f;
             float a = 1.0f;
             float t = 0.0f;
-            for (int i = 0; i < Params.octaves; i++)
+            for (int i = 0; i < Params.Octaves; i++)
             {
                 t += a * noise.snoise(f * pos);
-                f *= Params.lacunarity;
+                f *= Params.Lacunarity;
                 a *= g;
             }
 

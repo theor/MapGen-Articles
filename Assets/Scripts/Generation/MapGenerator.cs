@@ -40,10 +40,10 @@ public class MapGenerator : MonoBehaviour
     // Random seed
     public Params GenerationParams  = new Params
     {
-        lacunarity = 2,
-        persistence = .5f,
-        octaves = 4,
-        noiseScale = 40,
+        Lacunarity = 2,
+        Persistence = .5f,
+        Octaves = 4,
+        NoiseScale = 40,
 
         HeightFactor = 1,
     };
@@ -94,7 +94,7 @@ public class MapGenerator : MonoBehaviour
                 switch (ColorMode)
                 {
                     case ColorModes.HeightVisualization: // when UseTriangleHeight:
-                        c1 = c2 = c3 = h(Tridata[index]);
+                        c1 = c2 = c3 = h(index, Tridata[index]);
                         break;
                     case ColorModes.None:
                         c1 = c2 = c3 = Color.white;
@@ -111,8 +111,13 @@ public class MapGenerator : MonoBehaviour
                     //     break;
                     default: throw new InvalidDataException(ColorMode.ToString());
                 }
-                
-                b.AddTriangle(sFace, Storage, Tridata[index].Height * GenerationParams.HeightFactor, c1, c2, c3);
+
+                var height = Tridata[index].Height * GenerationParams.HeightFactor;
+                b.AddTriangle(sFace, Storage, height, c1, c2, c3);
+
+                AddQuadOnEdge(height, b, c1, sFace.Edge1);
+                AddQuadOnEdge(height, b, c1, sFace.Edge2);
+                AddQuadOnEdge(height, b, c1, sFace.Edge3);
 
                 // b.AddTriangle(sFace, Storage,
                 //     _params.HeightFactor *
@@ -127,7 +132,7 @@ public class MapGenerator : MonoBehaviour
             }
         });
         
-        Color h(TriangleData tridata)
+        Color h(int index, TriangleData tridata)
         {
             var f = math.clamp(math.remap(-1f, 1f, 0f, 1f, tridata.Height), 0f, 1f);
 
@@ -136,8 +141,10 @@ public class MapGenerator : MonoBehaviour
                 ColorUtility.TryParseHtmlString(s, out var c);
                 return c;
             }
+            // var x = math.remap(0, 50, 0.5f, 1f, (HaltonSequence.HaltonInt(index, 23, 50)));
+            var x = math.remap(-1, 1, 0.5f, 1f, noise.snoise(tridata.Centroid/10));
 
-            var x = math.remap(0f, 1f, 0.8f, 1f, (float)HaltonSequence.Halton((int) (tridata.Centroid.x*13 + tridata.Centroid.y*23), 7));
+            // var x = math.remap(0f, 1f, 0.8f, 1f, (float)HaltonSequence.Halton((int) (tridata.Centroid.x*13 + tridata.Centroid.y*23), 7));
 
             // var colors = new Color[] {Hex("#ce6a6b"), Hex("#ebaca2"), Hex("#bed3c3"), Hex("#4a919e"), Hex("#212e53")};
             var colors = new Color[] {Hex("#090446"), Hex("#786F52"), Hex("#FEB95F"), Hex("#F71735"), Hex("#C2095A")};
@@ -163,6 +170,16 @@ public class MapGenerator : MonoBehaviour
             //
             // var height2 = math.clamp(math.remap(GenerationParams.SeaLevel, Max, 0, 1, tridata.Height), 0.2f, 1);
             // return new Color(height2, height2, height2);
+        }
+
+        void AddQuadOnEdge(float height, MeshBuilder b, Color c1, Edge edge)
+        {
+            var va = Storage.F3(edge.A, height);
+            var vb = Storage.F3(edge.B, height);
+            var vc = va - new float3(0, va.y + GenerationParams.HeightFactor, 0);
+            var vd = vb - new float3(0, vb.y + GenerationParams.HeightFactor, 0);
+            b.AddTriangle(vb, va, vc, c1);
+            b.AddTriangle(vb, vc, vd, c1);
         }
     }
 

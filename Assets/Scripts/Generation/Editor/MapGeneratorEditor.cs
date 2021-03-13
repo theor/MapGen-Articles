@@ -19,11 +19,17 @@ namespace Generation.Editor
         public override void OnInspectorGUI()
         {
             var mapGenerator = (MapGenerator) target;
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Generate"))
             {
                 mapGenerator.Generate();
             }
-
+            if (GUILayout.Button("Generate with random seed"))
+            {
+                mapGenerator.GenerationParams.Seed = Random.Range(0, 10000);
+                mapGenerator.Generate();
+            }
+            EditorGUILayout.EndHorizontal();
             if (mapGenerator.Storage.IsCreated)
             {
                 var deletedTris = 0;

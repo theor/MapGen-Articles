@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Unity.Mathematics;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -28,6 +30,13 @@ namespace Generation
             _mesh.RecalculateNormals();
             _mesh.RecalculateTangents();
             _mesh.RecalculateBounds();
+            var uvs = new Vector2[_vertices.Count];
+            for (int i = 0; i < _vertices.Count; i++)
+            {
+                uvs[i] = new Vector2(_vertices[i].x, _vertices[i].z);
+            }
+
+            _mesh.uv = uvs;
         }
 
         private Mesh SetupMesh(GameObject go)
@@ -70,8 +79,13 @@ namespace Generation
             float3 v3,
             float y, Color color)
         {
-            var i = _vertices.Count;
             v1.y = v2.y = v3.y = y;
+            AddTriangle(v1, v2, v3, color);
+        }
+        public void AddTriangle(float3 v1, float3 v2,
+            float3 v3, Color color)
+        {
+            var i = _vertices.Count;
             _vertices.Add(v1);
             _vertices.Add(v2);
             _vertices.Add(v3);
