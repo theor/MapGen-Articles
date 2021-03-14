@@ -48,6 +48,7 @@ public class MapGenerator : MonoBehaviour
     
     public GizmosModes GizmosMode;
     public ColorModes ColorMode;
+    public GizmosOptions GizmosOptions;
 
     // Generation entry point
     public void Generate()
@@ -165,5 +166,12 @@ public class MapGenerator : MonoBehaviour
     private void OnDisable() => Dispose();
 
     private void OnDestroy() => Dispose();
+}
+
+[Serializable]
+public struct GizmosOptions
+{
+    public int _selectedTriangle;
+    public int _selectedPoint;
 }
 }

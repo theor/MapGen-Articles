@@ -22,7 +22,7 @@ namespace Generation
             public readonly ushort V3;
             public readonly float3 CircumCircleCenter;
             public readonly float CircumCircleRadiusSquared;
-            public int T1, T2, T3;
+            public ushort T1, T2, T3;
             public bool IsDeleted;
 
             public Triangle(TriangleStorage storage, ushort v1, ushort v2, ushort v3)
@@ -30,9 +30,9 @@ namespace Generation
                 V1 = v1;
                 V2 = v2;
                 V3 = v3;
-                T1 = -1;
-                T2 = -1;
-                T3 = -1;
+                T1 = 0;
+                T2 = 0;
+                T3 = 0;
                 IsDeleted = false;
 
                 Geometry.CircumCircle(storage.F3(v1), storage.F3(v2), storage.F3(v3),
@@ -97,15 +97,15 @@ namespace Generation
         public struct Vertex
         {
             public float2 Position;
-            public int TriangleIndex;
+            public ushort TriangleIndex;
         }
 
         public struct EdgeRef
         {
-            public readonly int TriangleIndex;
+            public readonly ushort TriangleIndex;
             public readonly int EdgeIndex;
 
-            public EdgeRef(int triangleIndex, int edgeIndex)
+            public EdgeRef(ushort triangleIndex, int edgeIndex)
             {
                 TriangleIndex = triangleIndex;
                 EdgeIndex = edgeIndex;
@@ -114,8 +114,8 @@ namespace Generation
 
         public NativeArray<Vertex> Points;
         public NativeList<Triangle> Triangles;
-        public NativeQueue<int> DeletedTriangles1;
-        public NativeQueue<int> DeletedTriangles2;
+        public NativeQueue<ushort> DeletedTriangles1;
+        public NativeQueue<ushort> DeletedTriangles2;
         
         private bool _firstPool;
         public void SwapPool() => _firstPool = !_firstPool;
@@ -124,8 +124,9 @@ namespace Generation
         {
             Points = new NativeArray<Vertex>(pointsLength, allocator);
             Triangles = new NativeList<Triangle>(allocator);
-            DeletedTriangles1 = new NativeQueue<int>(Allocator.Persistent);
-            DeletedTriangles2 = new NativeQueue<int>(Allocator.Persistent);
+            Triangles.Add(new Triangle{IsDeleted = true});
+            DeletedTriangles1 = new NativeQueue<ushort>(Allocator.Persistent);
+            DeletedTriangles2 = new NativeQueue<ushort>(Allocator.Persistent);
             _firstPool = true;
         }
 
@@ -144,11 +145,11 @@ namespace Generation
                 DeletedTriangles2.Dispose();
         }
 
-        public void AddVertex(int i, float2 position) => Points[i] = new Vertex {Position = position, TriangleIndex = -1};
+        public void AddVertex(int i, float2 position) => Points[i] = new Vertex {Position = position, TriangleIndex = 0};
 
-        public unsafe int AddTriangle(ushort v1, ushort v2, ushort v3)
+        public unsafe ushort AddTriangle(ushort v1, ushort v2, ushort v3)
         {
-            int idx;
+            ushort idx;
             if ((_firstPool ? DeletedTriangles1 : DeletedTriangles2).TryDequeue(out idx))
             {
                 Triangle* triPtr = (Triangle*) Triangles.GetUnsafePtr();
@@ -160,7 +161,7 @@ namespace Generation
             {
                 var t = new Triangle(this, v1, v2, v3);
                 Triangles.Add(t);
-                idx = Triangles.Length - 1;
+                idx = (ushort) (Triangles.Length - 1);
             }
 
             var unsafePtr = (Vertex*) Points.GetUnsafePtr();
@@ -170,9 +171,9 @@ namespace Generation
             return idx;
         }
 
-        public int AddTriangle(EdgeRef neighborEdge, ushort vertexIndex)
+        public ushort AddTriangle(EdgeRef neighborEdge, ushort vertexIndex)
         {
-            var deletedTriangle = Triangles[neighborEdge.TriangleIndex];
+            var deletedTriangle = Triangles[(int) neighborEdge.TriangleIndex];
             Assert.IsTrue(neighborEdge.EdgeIndex < 3);
             
             Edge e = default;
@@ -183,7 +184,7 @@ namespace Generation
                 case 2: e = deletedTriangle.Edge3; break;
             }
             
-            var i = AddTriangle(e.A, e.B, vertexIndex);
+            ushort i = AddTriangle(e.A, e.B, vertexIndex);
             ref Triangle newTriangle = ref Triangles.ElementAt(i);
 
             switch (neighborEdge.EdgeIndex)
@@ -192,13 +193,13 @@ namespace Generation
                 case 1: newTriangle.T1 = deletedTriangle.T2; break;
                 case 2: newTriangle.T1 = deletedTriangle.T3; break;
             }
-            if(newTriangle.T1 != -1)
+            if(newTriangle.T1 != 0)
                 SetNeighbour(ref Triangles.ElementAt(newTriangle.T1), e.A, e.B, i); // !
 
             return i;
         }
 
-        public ref Triangle RemoveTriangle(int triIndex)
+        public ref Triangle RemoveTriangle(ushort triIndex)
         {
             ref var triangle = ref Triangles.ElementAt(triIndex);
             triangle.IsDeleted = true;
@@ -214,7 +215,7 @@ namespace Generation
 
         public float2 F2(ushort pi1) => Points[pi1].Position;
 
-        public void SetNeighbour(ref Triangle t, ushort vertexA, ushort vertexB, int newNeighbourIndex)
+        public void SetNeighbour(ref Triangle t, ushort vertexA, ushort vertexB, ushort newNeighbourIndex)
         {
             if (t.Edge1.A == vertexB && t.Edge1.B == vertexA)
                 t.T1 = newNeighbourIndex;

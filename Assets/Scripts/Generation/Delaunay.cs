@@ -49,13 +49,13 @@ namespace Generation
             Storage.AddTriangle((ushort) points.Length, (ushort) (points.Length + 1), (ushort) (points.Length + 2));
 
             // List of triangle indices that intersect with the newly added point.
-            var badTriangles = new NativeList<int>(100, Allocator.Temp);
+            var badTriangles = new NativeList<ushort>(100, Allocator.Temp);
             // The list of edges forming the contour around the hole created when we delete the bad triangles
             // We'll recreate a new valid triangle with the point being added and each edge 
             var polygon = new NativeList<TriangleStorage.EdgeRef>(10, Allocator.Temp);
             
             // a list for newly created triangles. we'll patch each new triangle's neighbors 
-            NativeList<int> newTriangles = new NativeList<int>(polygon.Length, Allocator.Temp);
+            NativeList<ushort> newTriangles = new NativeList<ushort>(polygon.Length, Allocator.Temp);
 
             for (int ip = 0; ip < Storage.Points.Length - 3; ip++)
             {
@@ -70,7 +70,7 @@ namespace Generation
                 // slowest part (~93% of the time is spent here)
                 var trianglesLength = Storage.Triangles.Length;
                 // flood fill
-                for (int triangleIndex = 0; triangleIndex < trianglesLength; triangleIndex++)
+                for (ushort triangleIndex = 0; triangleIndex < trianglesLength; triangleIndex++)
                 {
                     var triangle = Storage.Triangles[triangleIndex];
                     if (triangle.IsDeleted)
@@ -104,7 +104,7 @@ namespace Generation
                 // find the boundary of the polygonal hole
                 for (int index = 0; index < badTriangles.Length; index++)
                 {
-                    int badTriangle = badTriangles[index];
+                    ushort badTriangle = badTriangles[index];
                     AddNonSharedEdgeToPolygon(Storage, badTriangles, badTriangle, 0, ref polygon);
                     AddNonSharedEdgeToPolygon(Storage, badTriangles, badTriangle, 1, ref polygon);
                     AddNonSharedEdgeToPolygon(Storage, badTriangles, badTriangle, 2, ref polygon);
@@ -116,7 +116,7 @@ namespace Generation
                 // remove them from the data structure
                 for (int index = badTriangles.Length - 1; index >= 0; index--)
                 {
-                    int i = badTriangles[index];
+                    ushort i = badTriangles[index];
                     Storage.RemoveTriangle(i);
                 }
 
@@ -130,7 +130,7 @@ namespace Generation
                     // potential optim: use deleted triangles as some kind of quadtree (tritree ?)
                     // index tris by their circumcenter
                     // that sets t1. t2,t3 set below
-                    var newTriangleIndex = Storage.AddTriangle(edge, (ushort) ip);
+                    ushort newTriangleIndex = Storage.AddTriangle(edge, (ushort) ip);
                     newTriangles.Add(newTriangleIndex);
                 }
 
@@ -164,7 +164,7 @@ namespace Generation
             polygon.Dispose();
 
             // cleanup
-            for (int index = 0; index < Storage.Triangles.Length; index++)
+            for (ushort index = 0; index < Storage.Triangles.Length; index++)
             {
                 var triangle = Storage.Triangles[index];
                 // if triangle contains a vertex from original super-triangle
@@ -174,11 +174,11 @@ namespace Generation
                 {
                     ref var t = ref Storage.RemoveTriangle(index);
                     if(t.T1 != -1)
-                        Storage.SetNeighbour(ref Storage.Triangles.ElementAt(t.T1), t.Edge1.A, t.Edge1.B, -1);
+                        Storage.SetNeighbour(ref Storage.Triangles.ElementAt(t.T1), t.Edge1.A, t.Edge1.B, 0);
                     if(t.T2 != -1)
-                        Storage.SetNeighbour(ref Storage.Triangles.ElementAt(t.T2), t.Edge2.A, t.Edge2.B, -1);
+                        Storage.SetNeighbour(ref Storage.Triangles.ElementAt(t.T2), t.Edge2.A, t.Edge2.B, 0);
                     if(t.T3 != -1)
-                        Storage.SetNeighbour(ref Storage.Triangles.ElementAt(t.T3), t.Edge3.A, t.Edge3.B, -1);
+                        Storage.SetNeighbour(ref Storage.Triangles.ElementAt(t.T3), t.Edge3.A, t.Edge3.B, 0);
                     Storage.Triangles[index] = t;
                 }
             }
@@ -186,8 +186,8 @@ namespace Generation
             BowyerWatsonMarker.End();
         }
 
-        private static void AddNonSharedEdgeToPolygon(TriangleStorage storage, NativeList<int> badTriangleIndices,
-            int badTriangleIndex, int edgeIndex,
+        private static void AddNonSharedEdgeToPolygon(TriangleStorage storage, NativeList<ushort> badTriangleIndices,
+            ushort badTriangleIndex, int edgeIndex,
             ref NativeList<TriangleStorage.EdgeRef> polygon)
         {
             var badTriangle = storage.Triangles[badTriangleIndex];
@@ -213,7 +213,7 @@ namespace Generation
                 polygon.Add(new TriangleStorage.EdgeRef(badTriangleIndex, edgeIndex));
         }
 
-        private void FloodFillBadTriangles(in TriangleStorage.Vertex v, int triangleIndex, ref NativeList<int> badTriangles)
+        private void FloodFillBadTriangles(in TriangleStorage.Vertex v, int triangleIndex, ref NativeList<ushort> badTriangles)
         {
             var triangle = Storage.Triangles[triangleIndex];
             CheckNeighbour(in v, triangle.T1, ref badTriangles);
@@ -221,7 +221,7 @@ namespace Generation
             CheckNeighbour(in v, triangle.T3, ref badTriangles);
         }
 
-        private void CheckNeighbour(in TriangleStorage.Vertex v, int triangleIndex, ref NativeList<int> badTriangles)
+        private void CheckNeighbour(in TriangleStorage.Vertex v, ushort triangleIndex, ref NativeList<ushort> badTriangles)
         {
             if (triangleIndex == -1)
                 return;
